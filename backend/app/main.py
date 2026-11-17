@@ -38,6 +38,7 @@ app = FastAPI(
     title="TalentMind AI API",
     description="Talent intelligence platform API",
     version="1.0.0",
+    root_path="/api",
 )
 
 password_hash = PasswordHash.recommended()
