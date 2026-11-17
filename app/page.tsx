@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Brain,
   Network,
@@ -44,13 +44,62 @@ export default function Home() {
   const open = (m: ModalType) => setModal(m);
   const close = () => setModal(null);
 
+  useEffect(() => {
+    const restoreSession = async () => {
+      const token = localStorage.getItem("talentmind_token");
+      const refreshToken = localStorage.getItem("talentmind_refresh_token");
+      if (!token) return;
+
+      try {
+        let response = await fetch("/api/auth/me", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (!response.ok && refreshToken) {
+          const refreshResponse = await fetch("/api/auth/refresh", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ refresh_token: refreshToken }),
+          });
+
+          if (!refreshResponse.ok) throw new Error("Session expired");
+
+          const refreshed = await refreshResponse.json();
+          localStorage.setItem("talentmind_token", refreshed.access_token);
+          localStorage.setItem("talentmind_refresh_token", refreshed.refresh_token);
+
+          response = await fetch("/api/auth/me", {
+            headers: { Authorization: `Bearer ${refreshed.access_token}` },
+          });
+        }
+
+        if (!response.ok) throw new Error("Session expired");
+
+        const profile = await response.json();
+        const name = profile.email.split("@")[0]
+          .replace(/[._]/g, " ")
+          .replace(/\b\w/g, (c: string) => c.toUpperCase());
+        setUser({ name, email: profile.email });
+      } catch {
+        localStorage.removeItem("talentmind_token");
+        localStorage.removeItem("talentmind_refresh_token");
+      }
+    };
+
+    void restoreSession();
+  }, []);
+
   return (
     <>
       <Navbar
         onSignIn={() => open("sign-in")}
         onDemo={() => open("demo")}
         user={user}
-        onSignOut={() => setUser(null)}
+        onSignOut={() => {
+          localStorage.removeItem("talentmind_token");
+          localStorage.removeItem("talentmind_refresh_token");
+          setUser(null);
+        }}
       />
 
       <HeroSection onDemo={() => open("demo")} onVideo={() => open("watch-video")} />
@@ -78,7 +127,12 @@ export default function Home() {
       {modal === "sign-in" && (
         <SignInModal
           onClose={close}
-          onSuccess={(name, email) => { setUser({ name, email }); close(); }}
+          onSuccess={(name, email, token, refreshToken) => {
+            localStorage.setItem("talentmind_token", token);
+            localStorage.setItem("talentmind_refresh_token", refreshToken);
+            setUser({ name, email });
+            close();
+          }}
         />
       )}
     </>
@@ -1162,13 +1216,50 @@ function DocsModal({ onClose }: { onClose: () => void }) {
 }
 
 /* 6. Sign In Modal */
-function SignInModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (name: string, email: string) => void }) {
+function SignInModal({ onClose, onSuccess }: {
+  onClose: () => void;
+  onSuccess: (name: string, email: string, token: string, refreshToken: string) => void;
+}) {
   const [form, setForm] = useState({ email: "", password: "" });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const name = form.email.split("@")[0].replace(/[._]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-    onSuccess(name, form.email);
+    setLoading(true);
+    setError("");
+
+    try {
+      const response = await fetch("/api/auth/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || "Sign-in failed. Check your credentials.");
+      }
+
+      const profileResponse = await fetch("/api/auth/me", {
+        headers: { Authorization: `Bearer ${data.access_token}` },
+      });
+      const profile = await profileResponse.json();
+
+      if (!profileResponse.ok) {
+        throw new Error(profile.detail || "Could not load your account.");
+      }
+
+      const name = profile.email.split("@")[0]
+        .replace(/[._]/g, " ")
+        .replace(/\b\w/g, (c: string) => c.toUpperCase());
+
+      onSuccess(name, profile.email, data.access_token, data.refresh_token);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to sign in.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -1214,8 +1305,14 @@ function SignInModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
               className="w-full border border-[#e5e7eb] rounded-lg px-3 py-2.5 text-sm text-[#1e1b4b] placeholder-[#d1d5db] focus:outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 transition-all"
             />
           </div>
-          <button type="submit" className="btn-primary w-full justify-center py-3 mt-1">
-            Sign In <ArrowRight size={15} />
+          {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+          <button
+            type="submit"
+            disabled={loading}
+            className="btn-primary w-full justify-center py-3 mt-1 disabled:opacity-60"
+          >
+            {loading ? "Signing in..." : "Sign In"}
+            {!loading && <ArrowRight size={15} />}
           </button>
           <div className="relative flex items-center gap-3 my-1">
             <div className="flex-1 h-px bg-indigo-100" />

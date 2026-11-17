@@ -39,3 +39,20 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Python backend
+__pycache__/
+*.py[cod]
+/backend/venv/
+/backend/.env
+/backend/data/
+/backend/*.log
+/backend/*.pid
+/backend/keys/*.pem
+
+# Temporary backups and runtime files
+*backup*
+*.before-langgraph
+*.pid
+*.db
+*.key
